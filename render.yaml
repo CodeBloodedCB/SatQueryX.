@@ -11,5 +11,17 @@ services:
         value: 3.11.9
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
+      - key: OPENROUTER_VISION_MODEL
+        value: openrouter/free
       - key: GROQ_API_KEY
         sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: SELF_PING_URL
+        value: https://satquery-backend-1809.onrender.com
