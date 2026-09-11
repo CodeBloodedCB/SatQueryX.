@@ -1,8 +1,39 @@
-// Resolve API base URL dynamically for local dev, Vercel preview, and production cloud hosting
-const rawApiUrl = (import.meta as any).env?.VITE_API_URL;
-export const API_BASE_URL = rawApiUrl
-  ? `${rawApiUrl.replace(/\/+$/, '')}/api`
-  : ((import.meta as any).env?.PROD ? '/api' : 'http://localhost:8000/api');
+const configuredApiUrl = ((import.meta as any).env?.VITE_API_URL || '').trim();
+const productionApiUrl = 'https://satquery-backend-1809.onrender.com';
+
+// In production the frontend talks directly to the deployed FastAPI service.
+// Locally, VITE_API_URL can point at another backend (default: localhost:8000).
+export const API_BASE_URL = `${(
+  configuredApiUrl || ((import.meta as any).env?.PROD ? productionApiUrl : 'http://localhost:8000')
+).replace(/\/+$/, '')}/api`;
+
+async function requestJson(path: string, init?: RequestInit) {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, init);
+  } catch {
+    throw new Error(`Cannot reach SatQuery backend at ${API_BASE_URL}. Start FastAPI locally or set VITE_API_URL.`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  const data = contentType.includes('application/json')
+    ? await response.json().catch(() => ({}))
+    : await response.text().catch(() => '');
+
+  if (!response.ok) {
+    const message = typeof data === 'object' && data?.detail
+      ? data.detail
+      : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+const json = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -13,39 +44,11 @@ export const apiClient = {
   async uploadImage(file: File) {
     const formData = new FormData();
     formData.append('file', file);
-
-    const response = await fetch(`${API_BASE_URL}/upload`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to upload image');
-    }
-
-    return response.json();
+    return requestJson('/upload', { method: 'POST', body: formData });
   },
 
   async executeQuery(imageId: string, query: string, imageId2?: string | null) {
-    const response = await fetch(`${API_BASE_URL}/query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        image_id: imageId,
-        query: query,
-        image_id_2: imageId2 || undefined
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to execute query');
-    }
-
-    return response.json();
+    return requestJson('/query', json({ image_id: imageId, query, image_id_2: imageId2 || undefined }));
   },
 
   async submitQuery(imageId: string, query: string, imageId2?: string | null) {
@@ -53,41 +56,11 @@ export const apiClient = {
   },
 
   async generateCaption(imageId: string) {
-    const response = await fetch(`${API_BASE_URL}/caption`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ image_id: imageId }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to generate caption');
-    }
-
-    return response.json();
+    return requestJson('/caption', json({ image_id: imageId }));
   },
 
   async compareImages(imageId1: string, imageId2: string, timelineIds?: string[]) {
-    const response = await fetch(`${API_BASE_URL}/analyze/change`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image_id_1: imageId1,
-        image_id_2: imageId2,
-        timeline_image_ids: timelineIds,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to compare images');
-    }
-
-    return response.json();
+    return requestJson('/analyze/change', json({ image_id_1: imageId1, image_id_2: imageId2, timeline_image_ids: timelineIds }));
   },
 
   async analyzeChange(imageId1: string, imageId2: string, timelineIds?: string[]) {
@@ -95,190 +68,65 @@ export const apiClient = {
   },
 
   async fuseImages(imageId1: string, imageId2: string) {
-    const response = await fetch(`${API_BASE_URL}/fuse`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ image_id_1: imageId1, image_id_2: imageId2 }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to fuse images');
-    }
-
-    return response.json();
+    return requestJson('/fuse', json({ image_id_1: imageId1, image_id_2: imageId2 }));
   },
 
   async getAuditLogs() {
-    const response = await fetch(`${API_BASE_URL}/audit`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch audit logs');
-    }
-    return response.json();
+    return requestJson('/audit');
   },
 
   async sendChatMessage(message: string, history: ChatMessage[] = [], imageId?: string | null) {
-    const response = await fetch(`${API_BASE_URL}/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message,
-        history,
-        image_id: imageId || null,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to send chat message');
-    }
-
-    return response.json();
+    return requestJson('/chat', json({ message, history, image_id: imageId || null }));
   },
 
   async analyzeRegion(imageId: string, roiGeometry: any, question?: string, task?: string) {
-    const response = await fetch(`${API_BASE_URL}/analyze/region`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image_id: imageId,
-        roi_geometry: roiGeometry,
-        question: question || 'Analyze this region',
-        task: task || 'vqa',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to analyze region');
-    }
-
-    return response.json();
+    return requestJson('/analyze/region', json({
+      image_id: imageId,
+      roi_geometry: roiGeometry,
+      question: question || 'Analyze this region',
+      task: task || 'vqa',
+    }));
   },
 
   async analyzeEscalate(imageId: string, question: string, sarImageId?: string | null) {
-    const response = await fetch(`${API_BASE_URL}/analyze/escalate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image_id: imageId,
-        question,
-        sar_image_id: sarImageId || null,
-        force_high_precision: true,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Escalation pipeline failed');
-    }
-
-    return response.json();
+    return requestJson('/analyze/escalate', json({
+      image_id: imageId,
+      question,
+      sar_image_id: sarImageId || null,
+      force_high_precision: true,
+    }));
   },
 
   async getTeeShowcases() {
-    const response = await fetch(`${API_BASE_URL}/tee/showcases`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch globe showcase locations');
-    }
-    return response.json();
+    return requestJson('/tee/showcases');
   },
 
   async extractTeeImagery(bbox: number[], date: string, locationId?: string) {
-    const response = await fetch(`${API_BASE_URL}/tee/extract`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        bbox,
-        date,
-        location_id: locationId,
-        source: 'NASA_GIBS',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Imagery extraction failed');
-    }
-
-    return response.json();
+    return requestJson('/tee/extract', json({ bbox, date, location_id: locationId, source: 'NASA_GIBS' }));
   },
 
   async geocodeLocation(query: string) {
-    const response = await fetch(`${API_BASE_URL}/tee/geocode?q=${encodeURIComponent(query)}`);
-    if (!response.ok) {
-      throw new Error('Geocoding service unavailable');
-    }
-    return response.json();
+    return requestJson(`/tee/geocode?q=${encodeURIComponent(query)}`);
   },
 
-  async searchCatalog(params: {
-    bbox: number[];
-    startDate: string;
-    endDate: string;
-    sensor?: string;
-    cloudMax?: number;
-    limit?: number;
-  }) {
-    const response = await fetch(`${API_BASE_URL}/tee/search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        bbox: params.bbox,
-        start_date: params.startDate,
-        end_date: params.endDate,
-        sensor: params.sensor || 'ALL',
-        cloud_max: params.cloudMax ?? 30.0,
-        limit: params.limit || 10,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Catalog search failed');
-    }
-
-    return response.json();
+  async searchCatalog(params: { bbox: number[]; startDate: string; endDate: string; sensor?: string; cloudMax?: number; limit?: number }) {
+    return requestJson('/tee/search', json({
+      bbox: params.bbox,
+      start_date: params.startDate,
+      end_date: params.endDate,
+      sensor: params.sensor || 'ALL',
+      cloud_max: params.cloudMax ?? 30,
+      limit: params.limit || 10,
+    }));
   },
 
   async validatePair(imageId1: string, imageId2: string, task?: string) {
-    const response = await fetch(`${API_BASE_URL}/validate/pair`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image_id_1: imageId1,
-        image_id_2: imageId2,
-        task: task || 'change_detection',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Pair validation failed');
-    }
-
-    return response.json();
+    return requestJson('/validate/pair', json({ image_id_1: imageId1, image_id_2: imageId2, task: task || 'change_detection' }));
   },
 
   async checkHealth(): Promise<{ status: string; service?: string; ai_engine?: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/health`);
-      if (response.ok) return await response.json();
-      return { status: 'error' };
+      return await requestJson('/health');
     } catch {
       return { status: 'offline' };
     }
@@ -286,14 +134,7 @@ export const apiClient = {
 
   startTabKeepAlive(intervalMinutes = 5) {
     if (typeof window === 'undefined') return;
-    this.checkHealth().catch(() => {});
-    setInterval(() => {
-      this.checkHealth().catch(() => {});
-    }, intervalMinutes * 60 * 1000);
-  }
+    const timer = window.setInterval(() => { void this.checkHealth(); }, intervalMinutes * 60 * 1000);
+    return () => window.clearInterval(timer);
+  },
 };
-
-// Automatically keep backend alive whenever user has the tab open
-if (typeof window !== 'undefined') {
-  apiClient.startTabKeepAlive(5);
-}
